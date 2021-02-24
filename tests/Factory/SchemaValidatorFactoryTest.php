@@ -1,0 +1,177 @@
+<?php
+
+/**
+ * Copyright (C) GrizzIT, Inc. All rights reserved.
+ * See LICENSE for license details.
+ */
+
+namespace GrizzIt\JsonSchema\Tests\Factory;
+
+use stdClass;
+use InvalidArgumentException;
+use PHPUnit\Framework\TestCase;
+use GrizzIt\Validator\Common\ValidatorInterface;
+use GrizzIt\JsonSchema\Exception\SchemaException;
+use GrizzIt\JsonSchema\Factory\SchemaValidatorFactory;
+use GrizzIt\JsonSchema\Component\Storage\StorageManager;
+use GrizzIt\JsonSchema\Component\Validator\ReferenceValidator;
+
+/**
+ * @coversDefaultClass GrizzIt\JsonSchema\Factory\SchemaValidatorFactory
+ * @covers GrizzIt\JsonSchema\Factory\Validator\ValidatorFactory
+ */
+class SchemaValidatorFactoryTest extends TestCase
+{
+    /**
+     * @return void
+     *
+     * @covers ::createFromString
+     */
+    public function testCreateFromString(): void
+    {
+        $subject = new SchemaValidatorFactory();
+
+        $this->assertInstanceOf(
+            ValidatorInterface::class,
+            $subject->createFromString('{"enum": ["foo"]}', 'foo.json')
+        );
+    }
+
+    /**
+     * @return void
+     *
+     * @covers ::createFromString
+     */
+    public function testCreateFromStringInvalidJson(): void
+    {
+        $subject = new SchemaValidatorFactory();
+
+        $this->expectException(SchemaException::class);
+
+        $subject->createFromString(']"foo"[');
+    }
+
+    /**
+     * @return void
+     *
+     * @covers ::createFromLocalFile
+     * @covers ::createFromRemoteFile
+     * @covers ::create
+     */
+    public function testCreateFromLocalFile(): void
+    {
+        $subject = new SchemaValidatorFactory();
+
+        $this->assertInstanceOf(
+            ValidatorInterface::class,
+            $subject->createFromLocalFile(__DIR__ . '/../assets/schema.json')
+        );
+
+        $this->expectException(InvalidArgumentException::class);
+
+        $subject->createFromLocalFile(__DIR__ . '/../assets/nope.json');
+    }
+
+    /**
+     * @return void
+     *
+     * @covers ::createFromLocalFile
+     * @covers ::createFromRemoteFile
+     * @covers ::create
+     */
+    public function testCreateWithLocalReference(): void
+    {
+        $subject = new SchemaValidatorFactory();
+        /** @var ReferenceValidator $referenceValidator */
+        $referenceValidator = $subject->createFromLocalFile(
+            __DIR__ . '/../assets/local-reference.json'
+        );
+
+        $equalizedValidator = new ReferenceValidator(
+            $referenceValidator->getReference()
+        );
+
+        $equalizedValidator->setValidator(
+            $subject->createFromLocalFile(__DIR__ . '/../assets/schema.json')
+        );
+
+        $this->assertEquals(
+            $referenceValidator,
+            $equalizedValidator
+        );
+    }
+
+    /**
+     * @return void
+     *
+     * @covers ::createFromRemoteFile
+     * @covers ::create
+     */
+    public function testCreateFromRemoteFile(): void
+    {
+        $storageManager = new StorageManager();
+        $subject = new SchemaValidatorFactory(null, $storageManager);
+        $result = $subject->createFromRemoteFile(
+            'http://json-schema.org/draft-07/schema#'
+        );
+
+        $this->assertInstanceOf(
+            ValidatorInterface::class,
+            $result
+        );
+
+        // Verify that the object isn't being constructed twice.
+        $this->assertSame(
+            $result,
+            $subject->createFromRemoteFile(
+                'http://json-schema.org/draft-07/schema#'
+            )
+        );
+
+        $injectSchema = (object) ['type' => 'object'];
+        $storageManager->getSchemaStorage()->set('foo.json', $injectSchema);
+        // foo.json has been injected above, but was never built.
+        $newResult = $subject->createFromRemoteFile('foo.json');
+        $this->assertInstanceOf(
+            ValidatorInterface::class,
+            $newResult
+        );
+    }
+
+    /**
+     * @return void
+     *
+     * @covers ::__construct
+     * @covers ::createVerifiedValidator
+     * @covers ::createFromRemoteFile
+     *
+     * @dataProvider failureSchemaProvider
+     */
+    public function testCreateVerifiedValidatorException(
+        object $schema
+    ): void {
+        $subject = new SchemaValidatorFactory();
+        $this->expectException(SchemaException::class);
+        $subject->createVerifiedValidator($schema);
+    }
+
+    /**
+     * @return array
+     */
+    public function failureSchemaProvider(): array
+    {
+        return [
+            [
+                // no $schema set.
+                (object) ['foo' => 'bar'],
+            ],
+            [
+                // Enum must be an array.
+                (object) [
+                    '$schema' => 'http://json-schema.org/draft-07/schema#',
+                    'enum' => new stdClass()
+                ],
+            ]
+        ];
+    }
+}

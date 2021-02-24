@@ -1,0 +1,82 @@
+<?php
+
+/**
+ * Copyright (C) GrizzIT, Inc. All rights reserved.
+ * See LICENSE for license details.
+ */
+
+namespace GrizzIt\JsonSchema\Component\Translator;
+
+use GrizzIt\JsonSchema\Exception\SchemaException;
+use GrizzIt\JsonSchema\Common\ReferenceTranslatorInterface;
+
+class ReferenceTranslator implements ReferenceTranslatorInterface
+{
+    private const URL_REGEX = '/^(https?:\\/\\/){1}(((?!-)[0-9a-z-]+[0-9a-z]+' .
+    '(?!-))(\\.(?!-)[0-9a-z-]+[0-9a-z]+(?!-))*(:\\d+)?)([\\w\\/\\-]*#?)/';
+
+    /**
+     * Translates the reference.
+     *
+     * @param string $schemaId
+     * @param string $reference
+     * @param string $schemaPath
+     *
+     * @return string
+     *
+     * @throws SchemaException When the reference can not be determined.
+     */
+    public function translate(
+        string $schemaId,
+        string $reference,
+        string $schemaPath = ''
+    ): string {
+        if (substr($reference, 0, 1) === '#') {
+            return rtrim($schemaId, '#') . $reference;
+        }
+
+        if (preg_match('/^https?:\/\//', $reference) === 1) {
+            return $reference;
+        }
+
+        if (preg_match(static::URL_REGEX, $schemaId, $matches) === 1) {
+            if (strpos($matches[6], '#') === false) {
+                return sprintf('%s%s/%s', $matches[1], $matches[2], ltrim($reference, '/'));
+            }
+
+            return sprintf('%s/%s', $matches[0], ltrim($reference, '/'));
+        }
+
+        if (substr($reference, 0, 1) === '/') {
+            return $reference;
+        }
+
+        if (!empty($schemaPath)) {
+            $expReference = explode('#', $reference, 2);
+
+            return implode(
+                '#',
+                array_merge(
+                    [
+                        realpath(
+                            sprintf(
+                                '%s/%s',
+                                dirname($schemaPath),
+                                array_shift($expReference)
+                            )
+                        )
+                    ],
+                    $expReference
+                )
+            );
+        }
+
+        throw new SchemaException(
+            sprintf(
+                'Could not translate %s in %s.',
+                $reference,
+                $schemaId
+            )
+        );
+    }
+}
